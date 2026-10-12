@@ -60,6 +60,13 @@ Interface bắt buộc (agent/loop.py import và gọi hàm này nếu tồn t�
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+import re
+from uuid import uuid4
+
+from agent import ledger, pii, policy, tools
 
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 DEFAULT_LEDGER_PATH = REPORTS_DIR / "ledger.jsonl"
@@ -71,4 +78,67 @@ class RunnerScaffoldPending(NotImplementedError):
 
 def handle(message: str, llm, log_dir: Path | None = None,
            principal_id: str = "support_l1") -> str:
-    raise RunnerScaffoldPending("BƯỚC 3c: implement trifecta split")
+    path = (Path(log_dir) if log_dir is not None else REPORTS_DIR) / "ledger.jsonl"
+    agent_id = f"lab24-agent/{uuid4().hex}"
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    run_a, run_b = f"run-a/{uuid4().hex}", f"run-b/{uuid4().hex}"
+    parent_scopes = ("search_docs", "read_customer")
+
+    def authorize(tool, args, classification, run_id, scopes, purpose, *, depth=0, egress=False):
+        context = policy.PolicyContext(
+            data_classification=classification, request_purpose=purpose,
+            agent_owner=f"{agent_id}/{run_id}", delegation_depth=depth,
+            egress_enabled=egress, principal_id=principal_id,
+            requested_tool=tool, agent_scopes=scopes,
+            parent_scopes=parent_scopes if depth else (), expires_at=expires_at,
+        )
+        allow, reason = policy.check(context)
+        # Write the decision before executing a tool; logging failure stops execution.
+        ledger.append({
+            "ts": datetime.now(timezone.utc).isoformat(), "agent_id": agent_id,
+            "run_id": run_id, "on_behalf_of": principal_id, "expires_at": expires_at,
+            "tool": tool, "args_hash": hashlib.sha256(
+                json.dumps(args, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest(), "classification": classification,
+            "decision": "allow" if allow else "deny", "reason": reason,
+        }, path)
+        return allow
+
+    # Run A: untrusted documents only; no private store and no egress capability.
+    if not authorize("search_docs", {"query": message}, "internal", run_a,
+                     ("search_docs",), "summarize-tickets"):
+        return "Không được phép tìm kiếm ticket cho principal này."
+    docs = tools.search_docs(message)
+    safe_docs = [{"id": d["id"], "text": pii.redact(d["text"])} for d in docs]
+    injection = llm.find_injection("\n\n".join(d["text"] for d in safe_docs))
+    if injection is not None:
+        # The attempted private-data POST is evaluated by PEP, never executed in A.
+        allowed = authorize("http_post", {"url": injection.target_url, "intent": "restricted-records"},
+                            "restricted", run_a, ("search_docs",), "support-reply", egress=True)
+        if allowed:
+            raise RuntimeError("Policy unexpectedly authorized egress from Run A")
+    ticket_ids = tuple(sorted({int(match.group(1)) for d in safe_docs
+                              if (match := re.fullmatch(r"ticket-([0-9]+)(?:b)?\.md", d["id"]))}))
+    # Only typed IDs cross the boundary: no text, injected customer ID or URL.
+    _run_b(ticket_ids, run_b, authorize)
+    return llm.summarize(safe_docs)
+
+
+def _run_b(ticket_ids: tuple[int, ...], run_id: str, authorize) -> None:
+    if not isinstance(ticket_ids, tuple) or any(type(item) is not int or item < 0 for item in ticket_ids):
+        raise ValueError("Run B accepts only nonnegative integer ticket IDs")
+    if not ticket_ids:
+        return
+    scopes = ("read_customer",)
+    # Gate the trusted lookup before even opening the private JSON store.
+    if not authorize("read_customer", {"ticket_ids": ticket_ids, "phase": "trusted-resolution"},
+                     "restricted", run_id, scopes, "support-reply", depth=1):
+        return
+    customers = json.loads(tools.CUSTOMERS_FILE.read_text(encoding="utf-8"))
+    related = set(ticket_ids)
+    customer_ids = sorted({record["customer_id"] for record in customers
+                           if related.intersection(record.get("related_tickets", []))})
+    for customer_id in customer_ids:
+        if authorize("read_customer", {"customer_id": customer_id}, "restricted", run_id,
+                     scopes, "support-reply", depth=1):
+            tools.read_customer(customer_id)
