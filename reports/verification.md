@@ -1,10 +1,10 @@
 # Verification — điền trước khi nộp
 
-- OS / Python / Gitleaks version: Windows native / Python 3.11.6 / Gitleaks chưa kiểm chứng, thuộc CP4.
-- `python -m pytest tests/ -q`: 30 passed, 3 failed; cả 3 failure thuộc CP4, chi tiết bên dưới.
-- `pre-commit run --all-files`: chưa chạy, hook thuộc CP4 chưa được tạo.
+- OS / Python / Gitleaks version: Windows native / Python 3.11.6 / Gitleaks 8.30.1.
+- `python -m pytest tests/ -q`: **33 passed**, không fail/skip ở CP4; kết quả 30 passed, 3 failed ở mục CP3 là trước khi làm supply chain.
+- `pre-commit run --all-files`: Passed tại CP4, với Gitleaks 8.30.1 trong PATH.
 - Ledger verify: `reports/ledger.jsonl` trả True; sửa dòng giữa không rehash trả False.
-- Các lỗi còn lại: CP4 thiếu hook, hash lock, incident note hoàn chỉnh; CP5 chưa hoàn thiện log after, compliance mapping và DPIA-lite.
+- Các lỗi còn lại: CP5 chưa hoàn thiện log after, compliance mapping và DPIA-lite.
 
 ## Kiểm tra CP2 — 12/10/2026
 
@@ -39,3 +39,15 @@ Run A chỉ đọc corpus, redact text trước khi dùng mock LLM, ghi deny cho
 - CP4 còn thiếu `.pre-commit-config.yaml`, `requirements.lock` và nội dung `reports/secrets-incident.md`. CP5 còn thiếu `reports/attack-after.log` và nội dung `reports/compliance-mapping.md`, `reports/dpia-lite.md`. Chưa coi toàn bài là hoàn tất.
 
 Regex và OBO chỉ được kiểm trên dữ liệu/quyền mô phỏng của lab. Hash chain không phát hiện cắt đuôi hay viết lại cả chuỗi nếu thiếu mốc tin cậy bên ngoài; ledger hiện phục vụ ghi tuần tự trong lab.
+
+## Kiểm tra CP4 — 12/10/2026
+
+- File CP4: tạo `.pre-commit-config.yaml` và `requirements.lock`; điền `reports/secrets-incident.md`; cập nhật `.gitleaks.toml` chỉ để bỏ `.venv/` khỏi directory scan; cập nhật báo cáo này. Không tạo báo cáo Markdown riêng hoặc sửa test bắt buộc.
+- `gitleaks version`: **8.30.1**, binary từ release chính thức đã kiểm SHA-256 archive. Activate `.venv` hoặc thêm `.venv/Scripts` vào PATH trước khi chạy scanner/hook.
+- `gitleaks git --config .gitleaks.toml --redact --verbose .`: **1 finding** thuộc `lab24-synthetic-token` tại `lab-fake-secret.txt:1`, commit `1bdd849922156c868a5ee9293d68f5b72e242d2c`; **exit 1 dự kiến**. Chi tiết xử lý token giả/rotate trong `reports/secrets-incident.md`.
+- `gitleaks dir --config .gitleaks.toml --redact .`: **0 finding, exit 0**; phạm vi không gồm `.venv/`, không loại các file bài làm hay token giả khỏi lịch sử.
+- `python -m piptools compile --generate-hashes --no-emit-index-url --no-emit-trusted-host -o requirements.lock requirements.txt`: đạt; **11 package** được pin, mỗi package có hash. `python -m pip install --require-hashes -r requirements.lock`: exit 0; cài lại với `--force-reinstall --require-hashes` cũng exit 0, kiểm các wheel thực tế.
+- Lỗi setup đã xử lý: pip-tools và pre-commit trong sandbox ban đầu không ghi được cache user (WinError 5); tải từ GitHub bị chặn mạng. Khi cache pre-commit đã tồn tại, chạy trong sandbox còn báo `attempt to write a readonly database`. Chạy lại với quyền được cấp thì tạo lock/tải scanner/chạy hook thành công. Directory scan ban đầu báo 3 finding trong thư viện/ví dụ scanner ở `.venv`; sau ngoại lệ đúng phạm vi môi trường local, quét sạch và quét lịch sử vẫn có token giả.
+- `python -X utf8 -m pytest tests/test_supply_chain.py -q`: **3 passed**. `python -X utf8 -m pytest tests/ -q`: **33 passed**, không fail/skip. `python -m pip check`: không có dependency bị lỗi.
+- `pre-commit run --all-files`: hook **Detect hardcoded secrets Passed**; repo chính thức pin v8.30.1, `pass_filenames: false`, cấu hình `.gitleaks.toml`. Quét file hiện tại không đồng nghĩa quét lịch sử; finding token giả được kiểm bằng lệnh riêng ở trên.
+- Bài vẫn còn CP5: tạo `reports/attack-after.log` sau reset/replay cuối và điền `reports/compliance-mapping.md`, `reports/dpia-lite.md` với evidence thật.

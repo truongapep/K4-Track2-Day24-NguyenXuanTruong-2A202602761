@@ -3,6 +3,10 @@ title = "Day 24 synthetic secret exercise"
 [extend]
 useDefault = true
 
+[[allowlists]]
+description = "Local Python environment and downloaded tooling; not part of the submission"
+paths = ['''(?:^|[/\\])\.venv[/\\]''']
+
 [[rules]]
 id = "lab24-synthetic-token"
 description = "A deliberately invalid lab token; never use real credentials"

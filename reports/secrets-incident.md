@@ -1,8 +1,15 @@
 # Secret giả trong lịch sử Git — điền trong checkpoint 4
 
-- Scanner và phiên bản:
-- Commit chứa token giả:
-- File, rule và kết quả quét lịch sử:
-- Kết quả quét file hiện tại:
-- Nếu đây là credential thật, cần xử lý thế nào:
-- Vì sao xoá file khỏi HEAD hoặc pin dependency vẫn chưa đủ:
+- Scanner và phiên bản: Gitleaks **8.30.1**, tải binary Windows x64 từ [release chính thức](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1). SHA-256 archive `gitleaks_8.30.1_windows_x64.zip` là `d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e`, khớp file checksum của release. Binary đặt trong `.venv/Scripts/gitleaks.exe`, có trong PATH khi activate venv; không đưa binary vào bài nộp.
+- Commit chứa token giả: `1bdd849922156c868a5ee9293d68f5b72e242d2c` (`1bdd849`). Token được cài sẵn cho lab, có định dạng `LAB24-DEMO`, vô hiệu và là dữ liệu synthetic; finding này không chứng minh đã lộ credential thật.
+- File, rule và kết quả quét lịch sử: `lab-fake-secret.txt:1`, rule **`lab24-synthetic-token`**. Chạy `gitleaks git --config .gitleaks.toml --redact --verbose .`: **7 commit được quét, 1 finding, exit code 1 đúng dự kiến**. Fingerprint: `1bdd849922156c868a5ee9293d68f5b72e242d2c:lab-fake-secret.txt:lab24-synthetic-token:1`. File đã bị xoá tại commit `ece6ca4` nhưng finding vẫn hiện trong lịch sử; không chép nguyên token vào báo cáo hay rewrite lịch sử để che finding.
+- Kết quả quét file hiện tại: `gitleaks dir --config .gitleaks.toml --redact .`: **0 finding, exit code 0**. `.gitleaks.toml` giữ default rules và rule lab, chỉ loại `.venv/` khỏi phạm vi vì đây là dependency/tooling local không được nộp theo SUBMISSION. Trước ngoại lệ này, directory scan báo 3 finding trong `.venv`: `generic-api-key` ở `setuptools/_distutils/msvccompiler.py:45` (gán `RegEnumKey`) và 2 chuỗi ví dụ trong README của scanner vừa tải. Không loại `corpus/`, `data/`, `reports/` hay `lab-fake-secret.txt`; quét lịch sử sau thay đổi vẫn bắt đúng token giả.
+- Nếu đây là credential thật, cần xử lý thế nào: thu hồi/rotate ngay tại bên cấp credential, kiểm tra việc sử dụng trái phép và phạm vi ảnh hưởng, thay credential trong hệ thống liên quan, rà các bản sao/log và xử lý lịch sử theo quy trình incident. Lab không tạo hoặc sử dụng secret thật.
+- Vì sao xoá file khỏi HEAD hoặc pin dependency vẫn chưa đủ: credential đã lộ có thể còn trong lịch sử Git hoặc bản sao và vẫn dùng được cho đến khi bị thu hồi. Dependency pin/hash và scanner/hook giảm rủi ro supply chain hoặc phát hiện secret được commit, không vô hiệu hoá credential đã phát hành; vì vậy không thay thế rotate.
+
+## Hook và dependency lock
+
+- `.pre-commit-config.yaml` dùng repo chính thức `https://github.com/gitleaks/gitleaks`, pin `rev: v8.30.1`, hook `gitleaks-system`, `pass_filenames: false`, args trỏ `.gitleaks.toml`. [Định nghĩa hook tại tag v8.30.1](https://github.com/gitleaks/gitleaks/blob/v8.30.1/.pre-commit-hooks.yaml) chạy staged Git diff; hook không thay thế quét toàn bộ lịch sử bằng lệnh riêng ở trên.
+- `requirements.lock` được sinh từ `requirements.txt` bằng `python -m piptools compile --generate-hashes --no-emit-index-url --no-emit-trusted-host -o requirements.lock requirements.txt` (pip-tools 7.6.2, Python 3.11.6). Pin đầy đủ **11 package**, mỗi package có SHA-256 hash, không ghi URL registry hoặc credential vào lock.
+- `python -m pip install --require-hashes -r requirements.lock` đạt. Chạy thêm `--force-reinstall --require-hashes` để kiểm hash của các wheel thực tế khi cài lại trong `.venv`: exit code 0.
+- Kết quả hook và test cuối CP4 ghi trong `reports/verification.md`. Bài dùng dữ liệu tổng hợp; kết quả scanner không bảo đảm phát hiện mọi loại secret.
