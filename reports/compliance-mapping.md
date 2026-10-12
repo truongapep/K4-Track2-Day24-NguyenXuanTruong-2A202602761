@@ -1,10 +1,18 @@
-# Compliance mapping — điền trong checkpoint 5
+# Compliance mapping — CP5, 12/10/2026
+
+Đây là đối chiếu control kỹ thuật của lab với chủ đề quản trị/bảo vệ dữ liệu và rủi ro agent. Các hàng pháp lý không phải kết luận đáp ứng điều khoản. Đã xác minh tên, số hiệu và thông tin hiệu lực trên trang nguồn Chính phủ; **đối chiếu điều/khoản trong toàn văn: chưa xác minh**. Vì vậy không gán số điều cụ thể hay khẳng định bài lab đủ điều kiện tuân thủ.
 
 | Nguồn / yêu cầu | Control đã làm | Evidence file:dòng | Giới hạn |
 |---|---|---|---|
-| Luật 91/2025/QH15 | | | |
-| NĐ 356/2025/NĐ-CP | | | |
-| Luật AI 134/2025/QH15 | | | |
-| OWASP ASI01, ASI03, ASI04 | | | |
+| [Luật 91/2025/QH15](https://vanban.chinhphu.vn/?pageid=27160&docid=214590) — chủ đề bảo vệ dữ liệu cá nhân | Redact CCCD/SĐT/STK/email; PEP chặn restricted + egress; log quyết định không chứa PII thô | `agent/pii.py:35`, `agent/pii.py:55`, `agent/policy.py:62`, `agent/runner.py:97`, `reports/ledger.jsonl:26` | Chỉ dữ liệu synthetic; regex không xử lý mọi PII, chưa có consent/retention/quyền chủ thể dữ liệu; điều khoản áp dụng chưa xác minh |
+| [NĐ 356/2025/NĐ-CP](https://vanban.chinhphu.vn/?pageid=27160&docid=216387) — văn bản hướng dẫn luật bảo vệ dữ liệu cá nhân | Lập mô tả dữ liệu, mục đích, luồng và rủi ro trong DPIA-lite; lưu evidence before/after và kiểm tính toàn vẹn audit | `reports/dpia-lite.md:3`, `reports/attack-before.log:1`, `reports/attack-after.log` (0 byte), `agent/ledger.py:65`, `reports/ledger.jsonl:25` | DPIA-lite phục vụ bài học, không thay hồ sơ/đánh giá tác động theo pháp luật; thủ tục và điều khoản cụ thể chưa xác minh |
+| [Luật AI 134/2025/QH15](https://vanban.chinhphu.vn/?pageid=27160&docid=216334) — chủ đề quản trị hệ thống AI | Giới hạn capability theo principal/purpose/scope/TTL; truy vết agent/run; tách nội dung không tin cậy khỏi private store | `agent/policy.py:59`, `agent/runner.py:82`, `agent/runner.py:120`, `agent/runner.py:127`, `reports/ledger.jsonl:25` | Mock deterministic và identity mô phỏng; không đánh giá/phân loại rủi ro pháp lý cho sản phẩm AI thực tế; điều khoản cụ thể chưa xác minh |
+| OWASP ASI01 — Agent Goal Hijack | Giữ lure hoạt động nhưng không dùng customer ID trong free text để truy private store; policy deny yêu cầu POST restricted | `agent/runner.py:112`, `agent/runner.py:116`, `agent/runner.py:120`, `agent/runner.py:137`, `tests/test_split.py:75`, `tests/test_injection.py:69`, `reports/ledger.jsonl:26` | 4 lure × 2 principal đạt, không chứng minh chống mọi injection hoặc model thật |
+| OWASP ASI03 — Identity & Privilege Abuse | Quyền là giao principal/agent/parent scopes; deny unknown principal, purpose sai và TTL hết hạn; log OBO | `agent/policy.py:67`, `agent/policy.py:73`, `agent/policy.py:83`, `tests/test_obo.py:29`, `tests/test_obo.py:39`, `tests/test_obo.py:51` | `--as` không xác thực người dùng thật; process/credential không được cách ly ở mức hệ điều hành |
+| OWASP ASI04 — Agentic Supply Chain Vulnerabilities | Hook scanner pin v8.30.1, dependency lock có hash, quét lịch sử token giả và ghi cách rotate khi secret thật lộ | `.pre-commit-config.yaml:1`, `requirements.lock:7`, `reports/secrets-incident.md:5`, `tests/test_supply_chain.py:11` | Pin/hash không bảo đảm dependency vô hại; hook staged không thay quét lịch sử; lab không triển khai MCP/A2A thực tế |
 
-Chỉ ghi điều khoản cụ thể khi đã đối chiếu văn bản gốc. Mô phỏng kỹ thuật không tự chứng minh tuân thủ pháp luật.
+Nguồn OWASP cho tên/mã rủi ro: [OWASP Top 10 for Agentic Applications, bản công bố chính thức](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/). Liên hệ từ từng rủi ro sang control trong bảng là phân tích kỹ thuật của bài làm.
+
+Thông tin hiệu lực đã đối chiếu ngày 12/10/2026: Luật 91 và NĐ 356 có hiệu lực 01/01/2026; Luật 134 có hiệu lực 01/03/2026, theo các trang Chính phủ liên kết ở từng hàng. Không suy ra tuân thủ pháp luật chỉ từ test pass.
+
+Evidence CP5: ledger dòng 25 là allow `search_docs`, dòng 26 là deny `http_post` vì restricted + egress, dòng 27 là allow gate phân giải private store và dòng 28–48 là allow các lần đọc customer hợp lệ dưới `dpo`. `reports/attack-after.log` rỗng nên không có số dòng; được copy từ sink sau reset/replay CLI cuối, không lấy log do pytest vừa reset. Kết quả và trình tự kiểm chứng trong `reports/verification.md`.

@@ -1,6 +1,19 @@
-# DPIA-lite — điền trong checkpoint 5
+# DPIA-lite — CP5, 12/10/2026
 
-1. Loại dữ liệu và phân loại:
-2. Mục đích xử lý và principal:
-3. Dữ liệu đi qua những run/tool nào, endpoint nào:
-4. Bằng chứng deny/allow và giới hạn của mock:
+1. **Loại dữ liệu và phân loại:** ticket trong `corpus/` là nội dung internal nhưng không tin cậy, có thể chứa chỉ thị attacker và PII synthetic. `data/customers.json` là private store restricted theo policy lab, gồm tên, CCCD, SĐT, email, STK và liên kết `related_tickets`. Không sử dụng PII hoặc credential thật. Dữ liệu phân quyền trong `data/principals.json` là fixture đáng tin cậy của mô phỏng. Ledger chỉ lưu metadata OBO, classification, decision/reason, TTL, args_hash và hash chain, không lưu record hay query thô; metadata vẫn cần kiểm soát truy cập nếu áp dụng thực tế.
+
+2. **Mục đích xử lý và principal:** yêu cầu hợp lệ là `Tổng hợp các ticket còn mở tuần này`. Run A dùng purpose `summarize-tickets`; Run B dùng `support-reply` để đọc khách gắn với ticket. `support_l1` chỉ được tìm ticket, không mở private store; `dpo` được đọc record hợp lệ. Quyền tool là giao principal allowed_tools, agent_scopes và parent_scopes khi có delegation; mỗi request tạo agent ID và run ID A/B riêng, TTL 5 phút. Không coi chỉ thị giả DPO/admin trong ticket là cấp quyền. Fixture `billing` chỉ được purpose đã khai báo; workflow này không tự nâng quyền để đáp ứng purpose khác.
+
+3. **Luồng dữ liệu, tool và nơi đi:**
+   - Trước containment, baseline đọc `search_docs`, lấy customer ID từ nội dung attacker, gọi `read_customer` rồi POST raw record vào `http://127.0.0.1:10024/reconcile`; `reports/attack-before.log:1` chứa record synthetic `KH-000999`.
+   - Sau containment, Run A được policy cho `search_docs`, redact CCCD/SĐT/STK/email trước khi đưa text vào mock LLM; chỉ tuple ID số từ tên file đi vào Run B (`agent/runner.py:120`). Không chuyển text ticket, customer ID attacker hay URL qua boundary. Run A không mở private store; yêu cầu POST hồ sơ restricted được policy deny và ghi ledger.
+   - Run B kiểm OBO trước khi mở store (`agent/runner.py:134`), map ID ticket qua `related_tickets` đáng tin cậy, kiểm tiếp ngay trước `tools.read_customer`. Record không truyền lại Run A, không tới model ngoài máy hay sink. Summary dùng ticket đã redact; regex không đảm bảo ẩn mọi loại PII, đặc biệt tên người.
+   - Mock không gọi cloud/API/model thật. Endpoint localhost chỉ là sink lab, không phải một dịch vụ ngoài máy hay bằng chứng chuyển dữ liệu xuyên biên giới. Đường model thật chưa được kiểm thử.
+   - File log bằng chứng được lưu trong repo để nộp bài; log before chỉ chứa synthetic. `.venv/` và `reports/sink.log` không nộp. Bài chưa xây cơ chế retention, xóa dữ liệu hay kiểm soát quyền truy cập file production.
+
+4. **Bằng chứng, rủi ro và giới hạn:**
+   - Final replay dưới `dpo`: vẫn tổng hợp 45 document, `reports/attack-after.log` **0 byte**. Ledger `reports/ledger.jsonl:25` allow search, dòng 26 deny `http_post` với reason `Restricted data must not cross an egress boundary` và `on_behalf_of=dpo`, dòng 27–48 cho đọc private store/customer hợp lệ. Tổng ledger 48 entry gồm CP3 và CP5, hash chain verify True; không có CCCD/SĐT/STK/email thô.
+   - `tests/test_injection.py`: 4 biến thể × 2 principal đều đạt; `tests/test_obo.py` kiểm support deny/dpo allow/delegation/TTL; `tests/test_split.py` không đọc `KH-000777` chỉ vì free text nhưng vẫn đọc khách hợp lệ. Full suite đạt 33 test, không skip.
+   - Rủi ro chính: nội dung ticket giả thẩm quyền dẫn tới lộ private record. Split hạn chế khách truy cập được; OBO giới hạn quyền; PEP restricted + egress chặn truyền ra; ledger giúp truy vết. `dpo` vẫn được đọc `KH-000999` vì khách gắn ticket lure, nên không thể chỉ dựa split để ngăn egress.
+   - Identity/`--as` chỉ mô phỏng, không authentication production; A/B là logic trong cùng process, không sandbox OS. Regex đạt 100% precision/recall trên test set lab nhưng không đảm bảo mọi định dạng PII. Mock deterministic không đo hành vi LLM thật. Hash chain không phát hiện xóa cuối/viết lại toàn chuỗi thiếu mốc bên ngoài, chưa có lock ghi nhiều process.
+   - Đây là DPIA-lite phục vụ bài học, không phải hồ sơ đánh giá tác động pháp lý chính thức; điều khoản pháp luật áp dụng cụ thể **chưa xác minh**. Nếu triển khai thực tế cần đánh giá căn cứ xử lý, quyền chủ thể dữ liệu, retention, phạm vi bên nhận, xác thực, cách ly và giám sát vận hành.
